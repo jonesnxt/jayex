@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html>
+<head>
+
+<style>
+.noselect {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    -khtml-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+}
+</style>
+<script src="../jquery.js"></script>
+<script src="d3.min.js"></script>
+<script src="../wallet/jay.min.js"></script>
+<script>
+Jay.setNode("jnxt.org");
+Jay.setRequestMethod(Jay.requestMethods.single);
+Jay.msTimeout = 10000;
+function getUrlParameter(sParam)
+{
+    var sPageURL = window.location.search.substring(1);
+    var sURLVariables = sPageURL.split('&');
+    for (var i = 0; i < sURLVariables.length; i++) 
+    {
+        var sParameterName = sURLVariables[i].split('=');
+        if (sParameterName[0] == sParam) 
+        {
+            return sParameterName[1];
+        }
+    }
+}
+var jay;
+function numberSort(a, b)
+{
+    return a - b;
+}
+
+function getNxtTime()
+{
+	return Math.floor(Date.now() / 1000) - 1385294400;
+}
+
+$("document").ready(function() {
+
+	Jay.request("getTrades", {"asset":getUrlParameter("asset")}, function(data)
+	{
+		jay = JSON.parse(data);
+		adjust(jay);
+		$("h1").html(jay.trades[0].name + "/NXT Market")
+	})
+
+$(document).on("mousemove", function(e)
+{
+		offsetX = $("#ex_chart").offset().left;
+		offsetY = $("#ex_chart").offset().top;
+		if(e.pageY-offsetY > 0 && e.pageY-offsetY < height && e.pageX-offsetX > 0 && e.pageX-offsetX < 1200)
+		{
+			var xval = Math.floor(e.pageX-offsetX)+0.5;
+			var yval = Math.floor(e.pageY-offsetY)+0.5;
+			$("#cursor_follow_x").attr("x1", 0).attr("x2", width+(xscales*2)).attr("y1", yval).attr("y2", yval).attr("stroke-width", 1);
+			$("#cursor_follow_y").attr("y1", 0).attr("y2", height+100).attr("x1", xval).attr("x2", xval).attr("stroke-width", 1);
+
+			var vol = (height-yval)/volscale;
+			vol = Math.round(vol * Math.pow(10, -Math.floor(Math.log10(vol)-2)))/Math.pow(10, -Math.floor(Math.log10(vol)-2));
+
+			$("#cursor_follow_vol").attr("y", yval-2).attr("x", 10).text(vol);
+			var pc = (height-yval)/scale+localmin;
+			pc = Math.round(pc * Math.pow(10, -Math.floor(Math.log10(pc)-2)))/Math.pow(10, -Math.floor(Math.log10(pc)-2));
+
+			$("#cursor_follow_price").attr("y", yval-2).attr("x", width+xscales+10).text(pc);
+		}
+		else
+		{
+			$("#cursor_follow_x").attr("stroke-width", 0);
+			$("#cursor_follow_y").attr("stroke-width", 0);
+			$("#cursor_follow_vol").text("");
+			$("#cursor_follow_price").text("");
+		}
+
+		if(isDragging)
+		{
+			var xval = Math.round(e.pageX-offsetX);
+			var yval = Math.round(e.pageY-offsetY);
+
+			var timespan =  $("input[name=time_span]:checked").val();
+			if(timespan == 0) timespan = getNxtTime() - first;
+			var chwidth = timespan/(getNxtTime()-first)*1200;
+			var newpos = xval-draggingPos;
+			if(newpos < 0) newpos = 0;
+			if(newpos+chwidth > 1200) newpos = 1200-chwidth;
+			d3.select("#scroll").attr("x", newpos);
+			scrollpos = newpos+chwidth;
+			draw();
+		}
+	});
+var isDragging = false;
+var draggingPos = 0;
+
+$("#ex_chart").mousedown(function(e) {
+	offsetX = $("#ex_chart").offset().left;
+	offsetY = $("#ex_chart").offset().top;
+	var xval = Math.round(e.pageX-offsetX);
+	var yval = Math.round(e.pageY-offsetY);
+	if(yval > 700 && yval < 800 && xval > 0 && xval < 1200)
+	{
+		var timespan =  $("input[name=time_span]:checked").val();
+		if(timespan == 0) timespan = getNxtTime() - first;
+		var chwidth = timespan/(getNxtTime()-first)*1200;
+		if(xval < scrollpos && xval > scrollpos-chwidth && getNxtTime()-first > timespan)
+		{
+			isDragging = true;
+			draggingPos = xval-scrollpos+chwidth;
+			console.log(draggingPos);
+		}
+	}
+
+})
+
+$(document).mouseup(function(e) {
+	isDragging = false;
+})
+
+$("input[name=time_width]").change(function() {
+	if(jay != undefined) adjust(jay);
+});
+
+$("input[name=time_span]").change(function() {
+	if(jay != undefined) adjust(jay);
+})
+
+	var offsetX = $("#ex_chart").offset().left;
+	var offsetY = $("#ex_chart").offset().top;
+	var width = 1000;
+	var xscales = 100;
+	var height = 600;
+	var volumes = [];
+	var localmin;
+	var amounts = [];
+	var scale = 0;
+	var volscale = 0;
+	var first = 0;
+	var scrollpos = 1200;
+
+// 42628958
+
+
+
+
+function adjust(asset)
+{
+
+	first = asset.trades[asset.trades.length-1].timestamp;
+	var now = getNxtTime();
+	var timespread = now - first;
+	var timescale = timespread/1200;
+	var starttime = first;
+	var endtime = now;
+	var span = endtime-starttime;
+	var timespan = $("input[name=time_span]:checked").val();
+	if(timespan == 0) timespan = now - first;
+	scrollpos = 1200;
+
+
+	var candlesticks = $("input[name=time_width]:checked").val();
+	var sticknum = Math.round(span/candlesticks);
+	var xstep = width/sticknum;
+
+	var show = (timespan/timespread)*1200;
+
+
+	//var starttime = 42827311-(60*60*20);
+
+	$("#bottom_scroll").empty();
+	d3.select("#bottom_scroll").append("rect").attr("id","scroll")
+	.attr("x", 1200-show).attr("width", show)
+	.attr("y", 700).attr("height", 100).attr("fill", "lightgray");
+
+	d3.select("#bottom_scroll").append("line").attr("id", "centerline")
+	.attr("x1", 0).attr("x2", (width+(xscales*2)))
+	.attr("y1", 750.5).attr("y2", 750.5)
+	.attr("stroke", "black");
+
+	var divtime = (endtime-starttime)/(sticknum-1);
+	var phases = [];
+	for(var e=0;e<asset.trades.length;e++)
+	{
+		var trade = asset.trades[e];
+		var phase = Math.floor((asset.trades[e].timestamp - starttime)/divtime);
+		if(phases[phase] == undefined) phases[phase] = [];
+		phases[phase].push(trade);
+	}
+	var prev = 0;
+	vals = [];
+	vols = [];
+	var chwidth = 1200/sticknum;
+	var minchange=1000000000,maxchange=0;
+	var changes = [];
+	for(var i=0;i<sticknum;i++)
+	{
+		if(phases[i] == undefined) phases[i] = [];
+		vals[i] = Array();
+		vols[i] = 0;
+		if(phases[i].length == 0)
+		{
+			vals[i].push(prev);
+		}
+		else
+		{	
+			for(var j=0;j<phases[i].length;j++)
+			{
+				var price = phases[i][j].priceNQT/Math.pow(10, 8-phases[i][j].decimals);
+				vols[i] += (phases[i][j].quantityQNT/Math.pow(10, phases[i][j].decimals))*(phases[i][j].priceNQT/Math.pow(10, 8-phases[i][j].decimals));
+				vals[i].push(price);
+				var change = prev == 0 ? price : prev-price;
+				if(change < minchange) minchange = change;
+				if(change > maxchange) maxchange = change;
+				prev = price;
+				changes.push(change);
+			}
+		}
+	}
+	var chscale = maxchange > -minchange ? 50/maxchange : 50/-minchange;
+	chscale *= 0.99
+	for(var i=0;i<sticknum;i++)
+	{
+		// change mapping
+		setChange(i, chwidth*i-(chwidth/2), (chwidth/4)*3, chscale*changes[i]);
+	}
+
+	amounts = vals;
+	volumes = vols;
+	draw();
+}
+
+	function draw()
+	{
+		var now = getNxtTime();
+		var timespread = now - first;
+		var timescale = timespread/1200;
+		var end = scrollpos*timescale;
+		var span = $("input[name=time_span]:checked").val();
+		if(span == 0) span = now-first;
+		var start = span != 0 ? end-span : first;
+		var candlesticks = $("input[name=time_width]:checked").val();
+		var sticknum = Math.round(span/candlesticks);
+		var xstep = width/sticknum;
+
+		var sp = Math.round(amounts.length * (scrollpos/1200));
+		if(sticknum > amounts.length)
+		{
+			var vals = amounts.reverse();
+			while(sticknum > vals.length) vals.push([0]);
+			var vols = volumes.reverse();
+			while(sticknum > vols.length) vols.push(0);
+		}
+		else
+		{
+			var vals = amounts.slice(sp-sticknum, sp).reverse();
+			var vols = volumes.slice(sp-sticknum, sp).reverse();
+		}
+
+		localmin=1000000000;
+		var localmax=0;
+		var volmax=0;
+		for(var i=0;i<sticknum;i++)
+		{
+			var n = vals[i].length;
+			for(var j=0;j<n;j++)
+			{
+				if(vals[i][j] > localmax) localmax = vals[i][j];
+				if(vals[i][j] < localmin) localmin = vals[i][j];
+			}
+			if(vols[i] > volmax) volmax = vols[i];
+		}
+		localmin /= 1.02;
+		localmax /= 0.98;
+		var spread = localmax - localmin;
+		scale = height/spread;
+		volscale = height/volmax;
+		volscale /= 1.1;
+
+		$("#boxes").empty();
+		$("#volbars").empty();
+		$("#axis").empty();
+		var prev = 0;
+		for(var i=0;i<vals.length;i++)
+		{
+			vals[i] = vals[i].sort(numberSort);
+			var info = {};
+			info.head = vals[i][vals[i].length-1];
+			info.tail = vals[i][0];
+			info.midline = vals[i][Math.floor(vals[i].length/2)];
+			info.bottom = vals[i][Math.floor(vals[i].length/4)];
+			info.top = vals[i][Math.floor((vals[i].length/4)*3)];
+			if(prev > info.midline) setColor("bw_"+(i-1), true);
+			else info.direction = setColor("bw_"+(i-1), false);
+			prev = info.midline;
+
+
+			var mdl = Math.round(chartConvert(info.midline, scale, localmin, height));
+			var btm = Math.round(chartConvert(info.bottom, scale, localmin, height)-mdl);
+			var tl = Math.round(chartConvert(info.tail, scale, localmin, height)-btm-mdl);
+			var tp = Math.round(mdl-chartConvert(info.top, scale, localmin, height));
+			var hd = Math.round(mdl-tp-chartConvert(info.head, scale, localmin, height));
+			var xamt = width-(i*xstep)+xscales;
+			if(width%xstep == 0) xamt -= (xstep/2);
+			else xamt -= (xstep/2);
+			xamt = Math.round(xamt);
+
+			box("bw_"+i, info.direction, xamt, mdl, Math.round(xstep/2), btm, tl, tp, hd);
+			volbar("vb_"+i, xamt, Math.round((xstep/4)*3), volscale*vols[i])
+		}
+		setColor("bw_"+(vals.length-1), true);
+
+		var axisnum = 10;
+		for(var i=0;i<axisnum;i++)
+		{
+			var pc = (height/axisnum)*i/scale+localmin;
+			if(pc != 0) pc = Math.round(pc * Math.pow(10, -Math.floor(Math.log10(pc)-2)))/Math.pow(10, -Math.floor(Math.log10(pc)-2));
+			var vol = (height/axisnum)*i/volscale;
+			if(vol != 0) vol = Math.round(vol * Math.pow(10, -Math.floor(Math.log10(vol)-2)))/Math.pow(10, -Math.floor(Math.log10(vol)-2));
+			setAxis(i, height - (height/axisnum)*i, pc, vol);
+		}
+	}
+
+	function chartConvert(value, scale, cutoff, topvalue)
+	{
+		return topvalue - (value-cutoff)*scale;
+	}
+	function box(id, direction, xpos, ypos, width, bottom, tail, top, head)
+	{
+		d3.select("#boxes").append("g").attr("id", id);
+		d3.select("#"+id).append("rect").attr("id", "body")
+		.attr("x", xpos-Math.round(width/2))
+		.attr("width", width)
+		.attr("y", ypos-top)
+		.attr("height",bottom+top)
+		d3.select("#"+id).append("line").attr("id", "midline")
+		.attr("x1", xpos-Math.round(width/2))
+		.attr("x2", xpos+Math.round(width/2))
+		.attr("y1", ypos)
+		.attr("y2",ypos)
+		d3.select("#"+id).append("line").attr("id", "bottom")
+		.attr("x1", xpos)
+		.attr("x2", xpos)
+		.attr("y1", ypos+bottom)
+		.attr("y2",ypos+bottom+tail).attr("stroke-width", Math.floor(width/3)+0.5);
+		d3.select("#"+id).append("line").attr("id", "top")
+		.attr("x1", xpos)
+		.attr("x2", xpos)
+		.attr("y1", ypos-top)
+		.attr("y2",ypos-head-top).attr("stroke-width", Math.round(width/3)+0.5);
+	}
+
+	function setColor(id, color)
+	{
+		if(color == true)
+		{
+			d3.select("#"+id+" #body").attr("fill","green").attr("stroke","black").attr("stroke-width","2");
+			d3.select("#"+id+" #midline").attr("stroke","black").attr("stroke-width", "2");
+			d3.select("#"+id+" #top").attr("stroke","black");
+			d3.select("#"+id+" #bottom").attr("stroke","black");
+
+		}
+		else
+		{
+			d3.select("#"+id+" #body").attr("fill","red").attr("stroke","black").attr("stroke-width","2");
+			d3.select("#"+id+" #midline").attr("stroke","black").attr("stroke-width", "2");
+			d3.select("#"+id+" #top").attr("stroke","black");
+			d3.select("#"+id+" #bottom").attr("stroke","black");
+		}
+	}
+
+	function volbar(id, volx, wd, ht)
+	{
+		d3.select("#volbars").append("rect").attr("id",id).attr("fill", "gray")
+		.attr("x", volx-Math.round(wd/2))
+		.attr("width", wd)
+		.attr("y", height-ht)
+		.attr("height", ht);
+	}
+
+	function setAxis(id, axisy, priceText, volumeText)
+	{
+		d3.select("#axis").append("line").attr("id", "line_"+id)
+		.attr("x1", 0).attr("x2", width+(xscales*2))
+		.attr("y1", Math.floor(axisy)+0.5).attr("y2", Math.floor(axisy)+0.5)
+		.attr("stroke", "black").attr("stroke-width", "0.1");
+		d3.select("#axis").append("text").attr("id", "vol_"+id)
+		.attr("x", 10).attr("y", axisy-2).text(volumeText);
+		d3.select("#axis").append("text").attr("id", "price_"+id)
+		.attr("x", width+xscales+10).attr("y", axisy-2).text(priceText);
+	}
+
+	function setChange(id, posx, width, amount)
+	{
+		if(amount < 0)
+		{
+			d3.select("#bottom_scroll").append("rect").attr("id", id)
+			.attr("x", Math.floor(posx + (width/2))+0.5).attr("width", width)
+			.attr("y", 750.5).attr("height", Math.round(-amount))
+			.attr("fill", "red").attr("stroke", "black");
+		}
+		else
+		{
+			d3.select("#bottom_scroll").append("rect").attr("id", "ch_"+id)
+			.attr("x", Math.floor(posx + (width/2))+0.5).attr("width", Math.round(width))
+			.attr("y", 750.5-Math.round(amount)).attr("height", Math.round(amount))
+			.attr("fill", "green").attr("stroke", "black");
+		}
+	}
+})
+
+
+</script>
+</head>
+<body>
+	<h1></h1>
+<svg id="ex_chart" width="1200" height="800" class="noselect">
+	<rect id="divider" stroke="black" fill="none" stroke-width="1" x="0" y="0" width="1200" height="800"/>
+	<g id="grid_lines">
+	</g>
+	<g id="axis">
+	</g>
+	<g id="axis_title">
+		<text x="10" y="20">Volume (NXT)</text>
+		<text x="1110" y="20">Price (NXT)</text>
+	</g>
+	<g id="volbars">
+
+	</g>
+	<g id="cursor_follow">
+		<line id="cursor_follow_x" stroke="black" stroke-width="0.5"/>
+		<line id="cursor_follow_y" stroke="black" stroke-width="0.5"/>
+		<text id="cursor_follow_vol"></text>
+		<text id="cursor_follow_price"></text>
+	</g>
+	
+	
+	<g id="boxes">
+	</g>
+	<g id="bottom_scroll">
+
+	</g>
+</svg><br/>
+Window Span:
+<div class="group_time_span">
+	1 Hour <input type="radio" name="time_span" value="3600"/>
+	3 Hours <input type="radio" name="time_span" value="10800"/>
+	6 Hours <input type="radio" name="time_span" value="21600"/>
+	12 Hours <input type="radio" name="time_span" value="43200"/>
+	1 Day <input type="radio" name="time_span" value="86400"/>
+	3 Days <input type="radio" name="time_span" value="259200" checked/>
+	1 Week <input type="radio" name="time_span" value="604800"/>
+	2 Weeks <input type="radio" name="time_span" value="1209600"/>
+	1 Month <input type="radio" name="time_span" value="2635200"/>
+	3 Months <input type="radio" name="time_span" value="7905600"/>
+	6 Months <input type="radio" name="time_span" value="15811200"/>
+	All Time <input type="radio" name="time_span" value="0"/>
+
+</div><br/>
+Candlesticks:
+<div class="group_time_width">
+	5 Minutes <input type="radio" name="time_width" value="300"/>
+	15 Minutes <input type="radio" name="time_width" value="900"/>
+	30 Minutes <input type="radio" name="time_width" value="1800"/>
+	1 Hour <input type="radio" name="time_width" value="3600"/>
+	3 Hours <input type="radio" name="time_width" value="10800" checked/>
+	6 Hours <input type="radio" name="time_width" value="21600"/>
+	12 Hours <input type="radio" name="time_width" value="43200"/>
+	1 Day <input type="radio" name="time_width" value="86400"/>
+	3 Days <input type="radio" name="time_width" value="259200"/>
+	1 Week <input type="radio" name="time_width" value="604800"/>
+	2 Weeks <input type="radio" name="time_width" value="1209600"/>
+	1 Month <input type="radio" name="time_width" value="2635200"/>
+</div>
+
+</body>
+</html>
