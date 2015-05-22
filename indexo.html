@@ -1,0 +1,1222 @@
+<!DOCTYPE html>
+<html>
+<head>
+
+<style>
+.noselect {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    -khtml-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+}
+
+.buy {
+	font-weight: bold;
+	color: green;
+}
+.sell {
+	font-weight: bold;
+	color: red;
+}
+</style>
+<script src="../jquery.js"></script>
+<script src="d3.min.js"></script>
+<script src="../wallet/jay.min.js"></script>
+<link href="../bootstrap/css/bootstrap.min.css" rel="stylesheet"/>
+<script src="../bootstrap/js/bootstrap.min.js"></script>
+<script>
+Jay.setNode("jnxt.org");
+Jay.setRequestMethod(Jay.requestMethods.single);
+Jay.msTimeout = 10000;
+function getUrlParameter(sParam)
+{
+    var sPageURL = window.location.search.substring(1);
+    var sURLVariables = sPageURL.split('&');
+    for (var i = 0; i < sURLVariables.length; i++) 
+    {
+        var sParameterName = sURLVariables[i].split('=');
+        if (sParameterName[0] == sParam) 
+        {
+            return sParameterName[1];
+        }
+    }
+}
+var jay;
+function numberSort(a, b)
+{
+    return a - b;
+}
+
+function getNxtTime()
+{
+	return Math.floor(Date.now() / 1000) - 1385294400;
+}
+
+function nxtTimeToDate(time)
+{
+	var time = new Date((time + 1385294400)*1000);
+	var min = Math.round(minute(time)/10)*10;
+	return day(time) + "<br/>" + hour(time) + ":" + min;
+}
+
+function toDecimal(number, dec)
+{
+	number *= Math.pow(10, dec);
+	number = Math.round(number);
+	number /= Math.pow(10, dec);
+	number = number.toString();
+	if(number.indexOf(".") === -1 && dec != 0)
+	{
+		number += ".";
+	}
+	while(number.indexOf(".")+dec >= number.length) number += "0";
+	if(number.indexOf(".")+dec > number.length) number = number.substring(0, number.indexOf(".")+dec);
+	return number;
+}
+
+function timeago(timestamp)
+{
+	var fromnow =  getNxtTime() - timestamp;
+		
+	var days =  Math.floor(fromnow/86400);
+	var hours = Math.floor((fromnow%86400)/3600);
+	var minutes = Math.floor((fromnow%3600)/60);
+	var seconds = Math.floor(fromnow&60);
+	var acc = "";
+	if(days != 0 && days != 1) acc = days + " days ago";
+	else if(days == 1) acc = " 1 day ago";
+	else if(hours != 0 && hours != 1) acc = hours + " hours ago";
+	else if(hours == 1) acc = "1 hour ago";
+	else if(minutes != 0 && minutes != 1) acc = minutes + " minutes ago";
+	else if(minutes == 1) acc = "1 minute ago";
+	else if(seconds != 0 && seconds != 1) acc = seconds + " seconds ago";
+	else if(seconds == 1) acc = "1 second ago";
+	else acc = "just now";
+		
+	return acc;
+}
+
+function sortByParam(obj, param)
+{
+	var sorted = [];
+	var max = 0;
+	var arr = obj[param];
+	arr = Array.sort(arr);
+	for(var a=0;a<arr.length;arr++)
+	{
+		for(var b=0;b<arr.length;arr++)
+		{
+			if(arr[a] == obj[b][param])
+			{
+				sorted.push(obj[b]);
+				break;
+			}
+		}
+	}
+	return sorted;
+}
+
+var day = d3.time.format("%b %e");
+var hour = d3.time.format("%H");
+var minute = d3.time.format("%M");
+var decimals;
+var bids = [];
+var asks = [];
+
+$("document").ready(function() {
+  $('[data-toggle="tooltip"]').tooltip();
+  $('[data-toggle="popover"]').popover();
+candlesticks();
+	Jay.request("getAllAssets", {} function(data) {
+		assets = JSON.parse(data).assets;
+		assets = sortByParam(assets, "numberOfTrades");
+	})
+
+	Jay.request("getTrades", {"asset":getUrlParameter("asset")}, function(data)
+	{
+		jay = JSON.parse(data);
+		adjust(jay);
+		$("h1").html(jay.trades[0].name + "/NXT Market")
+		$("span.asset").html(jay.trades[0].name);
+		decimals = jay.trades[0].decimals;
+		var counter = 0;
+		var trades = jay.trades;
+		for(var i=0;i<trades.length;i++)
+		{
+			if(counter++ == 50) break;
+			var price = toDecimal(trades[i].priceNQT/Math.pow(10, 8-decimals), 8-decimals);
+			var qnt = toDecimal(trades[i].quantityQNT/Math.pow(10, decimals), decimals);
+			var nxtprice = toDecimal(Number(price)*Number(qnt), 8);
+
+			var row = "<tr data-html='true' class='ttip' data-toggle='popover' data-trigger='click' data-placement='top' data-content='<strong>seller:</strong> "+trades[i].sellerRS+"<br/><strong>buyer:</strong> "+trades[i].buyerRS+"'>";
+			
+			row += "<td>" + timeago(trades[i].timestamp) + "</td>";
+			row += "<td class='"+trades[i].tradeType+"'>" + trades[i].tradeType + "</td>";
+			row += "<td>" + price + "</td>";
+			row += "<td>" + qnt + "</td>";
+			row += "<td>" + nxtprice + "</td>";
+			row += "</tr>";
+			$("#trade_history_table tbody").append(row);
+		}
+		  $('[data-toggle="popover"]').popover();
+
+		Jay.request("getBidOrders", {"asset":getUrlParameter("asset")}, function(data)
+		{
+			orders = JSON.parse(data).bidOrders;
+			bids = orders;
+			if(asks.length > 0) depth();
+			var priceone = orders[0].priceNQT/Math.pow(10, 8-decimals);
+			console.log(priceone);
+			$("#sell_order_price").val(priceone);
+			$("#buy_orders_table tbody").empty();
+			var total = 0;;
+			for(var i=0;i<orders.length;i++)
+			{
+				var price = toDecimal(orders[i].priceNQT/Math.pow(10, 8-decimals), 8-decimals);
+				var qnt = toDecimal(orders[i].quantityQNT/Math.pow(10, decimals), decimals);
+				var nxtprice = toDecimal(Number(price)*Number(qnt), 8);
+				total += Number(nxtprice);
+				var row = "<tr data-toggle='tooltip' data-placement='top' title='"+orders[i].accountRS+"'  data-price='"+price+"' data-amount='"+total+"'>";
+				row += "<td>" + price + "</td>";
+				row += "<td>" + qnt + "</td>";
+				row += "<td>" + nxtprice + "</td>";
+				total += Number(nxtprice);
+				row += "<td>" + toDecimal(total, 8) + "</td>";
+				row += "</tr>";
+				$("#buy_orders_table tbody").append(row);
+			}
+			$('[data-toggle="tooltip"]').tooltip();
+		})
+
+		Jay.request("getAskOrders", {"asset":getUrlParameter("asset")}, function(data)
+		{
+			orders = JSON.parse(data).askOrders;
+			asks = orders;
+			if(bids.length > 0) depth();
+			$("#sell_orders_table tbody").empty();
+			var priceone = orders[0].priceNQT/Math.pow(10, 8-decimals);
+			$("#buy_order_price").val(priceone);
+			var total = 0;
+			for(var i=0;i<orders.length;i++)
+			{
+				var row = "<tr data-toggle='tooltip' data-placement='top' title='"+orders[i].accountRS+"'  data-price='"+price+"' data-amount='"+total+"'>";
+				var price = toDecimal(orders[i].priceNQT/Math.pow(10, 8-decimals), 8-decimals);
+				var qnt = toDecimal(orders[i].quantityQNT/Math.pow(10, decimals), decimals);
+				row += "<td>" + price + "</td>";
+				row += "<td>" + qnt + "</td>";
+				var nxtprice = toDecimal(Number(price)*Number(qnt), 8);
+				row += "<td>" + nxtprice + "</td>";
+				total += Number(nxtprice);
+				row += "<td>" + toDecimal(total, 8) + "</td>";
+				row += "</tr>";
+				$("#sell_orders_table tbody").append(row);
+			}
+			$('[data-toggle="tooltip"]').tooltip();
+
+		})
+		$("tr").mouseout(function() {
+		$(this).popover("hide");
+		console.log("out");
+	})
+
+	}, function()
+	{
+		$("h1").html("Error: asset data timed out");
+	})
+
+
+
+$(document).on("mousemove", function(e)
+{
+		offsetX = $("#ex_chart").offset().left;
+		offsetY = $("#ex_chart").offset().top;
+		if(e.pageY-offsetY > 0 && e.pageY-offsetY < height && e.pageX-offsetX > 0 && e.pageX-offsetX < 1200)
+		{
+			var xval = Math.floor(e.pageX-offsetX)+0.5;
+			var yval = Math.floor(e.pageY-offsetY)+0.5;
+			$("#cursor_follow_x").attr("x1", 0).attr("x2", width+(xscales*2)).attr("y1", yval).attr("y2", yval).attr("stroke-width", 1);
+			$("#cursor_follow_y").attr("y1", 0).attr("y2", height+50).attr("x1", xval).attr("x2", xval).attr("stroke-width", 1);
+
+			var vol = (height-yval)/volscale;
+			vol = Math.round(vol * Math.pow(10, -Math.floor(Math.log10(vol)-2)))/Math.pow(10, -Math.floor(Math.log10(vol)-2));
+
+			$("#cursor_follow_vol").attr("y", yval-2).attr("x", 10).text(vol);
+			var pc = (height-yval)/scale+localmin;
+			pc = Math.round(pc * Math.pow(10, -Math.floor(Math.log10(pc)-2)))/Math.pow(10, -Math.floor(Math.log10(pc)-2));
+
+			$("#cursor_follow_price").attr("y", yval-2).attr("x", width+xscales+10).text(pc);
+
+			var volrect = d3.select("#cursor_follow_vol").node().getBBox();
+			d3.select("#backbox_vol").attr("x", volrect.x).attr("y", volrect.y)
+			.attr("width", volrect.width).attr("height", volrect.height)
+			.attr("fill", "white");
+			var volrect = d3.select("#cursor_follow_price").node().getBBox();
+			d3.select("#backbox_price").attr("x", volrect.x).attr("y", volrect.y)
+			.attr("width", volrect.width).attr("height", volrect.height)
+			.attr("fill", "white")
+		}
+		else
+		{
+			$("#cursor_follow_x").attr("stroke-width", 0);
+			$("#cursor_follow_y").attr("stroke-width", 0);
+			$("#cursor_follow_vol").text("");
+			$("#cursor_follow_price").text(""); 
+			$("#backbox_vol").attr("width", 0);
+			$("#backbox_price").attr("width", 0);
+		}
+
+		if(isDragging)
+		{
+			var xval = Math.round(e.pageX-offsetX);
+			var yval = Math.round(e.pageY-offsetY);
+
+			var timespan =  $("input[name=time_span]:checked").val();
+			if(timespan == 0) timespan = getNxtTime() - first;
+			var chwidth = timespan/(getNxtTime()-first)*1200;
+			var newpos = xval-draggingPos;
+			if(newpos < 0) newpos = 0;
+			if(newpos+chwidth > 1200) newpos = 1200-chwidth;
+			d3.select("#scroll").attr("x", newpos);
+			scrollpos = newpos+chwidth;
+			draw();
+		}
+
+		depthoffsetX = $("#depth").offset().left;
+		depthoffsetY = $("#depth").offset().top;
+		if(e.pageY-depthoffsetY > 0 && e.pageY-depthoffsetY < depthheight && e.pageX-depthoffsetX > 0 && e.pageX-depthoffsetX < 1200)
+		{
+			var xval = e.pageX-depthoffsetX
+			var xprc = ((pricestep*(xval-100))+pricemin)*Math.pow(10, 8-decimals);
+			var xreal = 0;
+			var yreal = 0;
+			var zreal = 0;
+			var cntr = 0;
+			var ctr = 0;
+			if(xprc < bids[0].priceNQT)
+			{
+				for(var i=0;i<bids.length;i++)
+				{
+					cntr += bids[i].priceNQT/Math.pow(10, 8-decimals)*bids[i].quantityQNT/Math.pow(10, decimals);
+					ctr += bids[i].quantityQNT/Math.pow(10, decimals);
+					if(xprc > bids[i].priceNQT)
+					{
+						if(xprc-bids[i].priceNQT < bids[i-1].priceNQT-xprc) 
+						{
+							xreal = bids[i].priceNQT/Math.pow(10, 8-decimals);
+							yreal = cntr;
+							zreal = ctr;
+						}
+						else 
+						{
+							xreal = bids[i-1].priceNQT/Math.pow(10, 8-decimals);
+							yreal = cntr - bids[i].priceNQT/Math.pow(10, 8-decimals)*bids[i].quantityQNT/Math.pow(10, decimals);;
+							zreal = ctr - bids[i].quantityQNT/Math.pow(10, decimals);;
+						}
+						break;
+					}
+				}
+			}
+			else if(xprc > asks[0].priceNQT)
+			{
+				for(var i=0;i<asks.length;i++)
+				{
+					cntr += asks[i].priceNQT/Math.pow(10, 8-decimals)*asks[i].quantityQNT/Math.pow(10, decimals);
+					ctr += asks[i].quantityQNT/Math.pow(10, decimals);
+
+					if(xprc < asks[i].priceNQT)
+					{
+						if(xprc-asks[i].priceNQT > asks[i-1].priceNQT-xprc)
+						{
+							xreal = asks[i].priceNQT/Math.pow(10, 8-decimals);
+							yreal = cntr;
+							zreal = ctr;
+						}
+						else 
+						{
+							xreal = asks[i-1].priceNQT/Math.pow(10, 8-decimals);
+							yreal = cntr - asks[i].priceNQT/Math.pow(10, 8-decimals)*asks[i].quantityQNT/Math.pow(10, decimals);
+							zreal = ctr - asks[i].quantityQNT/Math.pow(10, decimals);;
+						}
+						break;
+					}
+				}
+			}
+						console.log(xreal);
+
+			if(xreal == 0)
+			{
+				d3.select("#depth_circle").attr("cx", -1000);
+				d3.select("#depth_bar").attr("y1" -100).attr("y2", -100);
+				$("#depth_hover").hide();
+			}
+			else
+			{
+				var xval = Math.floor(((xreal-pricemin)/pricestep)+100)+0.5;
+				var yval = Math.floor(depthheight - yreal/depthstep)+0.5;
+				d3.select("#depth_circle").attr("cy", yval).attr("cx", xval);
+				d3.select("#depth_bar").attr("x1", xval).attr("x2", xval)
+				.attr("y1", 0).attr("y2", 300);
+
+				$("#depth_hover").show();
+				$("#depth_hover").css("top", yval+depthoffsetY-100);
+				$("#depth_hover").css("left", xval+depthoffsetX+4);
+				$("#hover_price").text(xreal);
+				$("#hover_nxt").text(toDecimal(yreal, 8-decimals));
+				$("#hover_asset").text(toDecimal(zreal, decimals));
+
+			}
+		}
+		else 
+		{
+			d3.select("#depth_circle").attr("cx", -1000);
+			d3.select("#depth_bar").attr("y1" -100).attr("y2", -100);
+			$("#depth_hover").hide();
+
+		}
+	});
+var isDragging = false;
+var draggingPos = 0;
+
+$("#ex_chart").mousedown(function(e) {
+	offsetX = $("#ex_chart").offset().left;
+	offsetY = $("#ex_chart").offset().top;
+	var xval = Math.round(e.pageX-offsetX);
+	var yval = Math.round(e.pageY-offsetY);
+	if(yval > 650 && yval < 750 && xval > 0 && xval < 1200)
+	{
+		var timespan =  $("input[name=time_span]:checked").val();
+		if(timespan == 0) timespan = getNxtTime() - first;
+		var chwidth = timespan/(getNxtTime()-first)*1200;
+		if(xval < scrollpos && xval > scrollpos-chwidth && getNxtTime()-first > timespan)
+		{
+			isDragging = true;
+			draggingPos = xval-scrollpos+chwidth;
+		}
+	}
+
+})
+
+$(document).mouseup(function(e) {
+	isDragging = false;
+})
+
+$("input[name=time_width]").change(function() {
+	if(jay != undefined) adjust(jay);
+});
+
+$("input[name=time_span]").change(function() {
+	candlesticks();
+	if(jay != undefined) adjust(jay);
+})
+
+
+$("#buy_order_price").on("input propertychange", buyRetotal);
+$("#buy_order_amount").on("input propertychange", buyRetotal);
+$("#sell_order_price").on("input propertychange", sellRetotal);
+$("#sell_order_amount").on("input propertychange", sellRetotal);
+$("#buy_order_total").on("input propertychange", buyamt);
+$("#sell_order_total").on("input propertychange", sellamt);
+
+function buyRetotal()
+{
+	var total = toDecimal(Number($("#buy_order_amount").val()*$("#buy_order_price").val()), 8);
+	$("#buy_order_total").val(total);
+}
+
+function sellRetotal()
+{
+	var total = toDecimal(Number($("#sell_order_amount").val()*$("#sell_order_price").val()), 8);
+	$("#sell_order_total").val(total);
+}
+
+function buyamt()
+{
+	var amt = toDecimal(Number($("#buy_order_total").val()/$("#buy_order_price").val()), 8-decimals);
+	$("#buy_order_amount").val(amt);
+}
+
+function sellamt()
+{
+	var amt = toDecimal(Number($("#sell_order_total").val()/$("#sell_order_price").val()), 8-decimals);
+	$("#sell_order_amount").val(amt);
+}
+
+var depthlen = 50;
+var depthheight = 280;
+var depthwidth = 1100;
+var depthoffsetX = $("#depth").offset().left;
+var depthoffsetY = $("#depth").offset().top;
+var pricestep = 0;
+var pricemin = 1000000000000;
+var depthstep = 0;
+function depth()
+{
+	var bidside = [];
+	var bidprice = [];
+	var total = 0;
+	var depthmax=0,pricemax=0;
+	var counter = 0;
+	for(var i=0;i<bids.length;i++)
+	{
+		var price = bids[i].priceNQT/Math.pow(10, 8-decimals);
+		total += price*bids[i].quantityQNT/Math.pow(10, decimals);
+		console.log(depthmax);
+		bidside.push(total);
+		bidprice.push(price);
+		if(depthmax < total) depthmax = total;	
+		if(pricemin > price) pricemin = price;
+		if(pricemax < price) pricemax = price;
+		if(++counter == depthlen) break;
+	}
+	var askside = [];
+	var askprice = [];
+	total = 0;
+	counter = 0;
+	for(var i=0;i<asks.length;i++)
+	{
+		var price = asks[i].priceNQT/Math.pow(10, 8-decimals);
+		total += price*asks[i].quantityQNT/Math.pow(10, decimals);
+		askside.push(total);
+		askprice.push(price);
+		if(depthmax < total) depthmax = total;
+		if(pricemin > price) pricemin = price;
+		if(pricemax < price) pricemax = price;
+		if(++counter == depthlen || price > askprice[0]*2) break;
+	}
+	depthstep = depthmax/depthheight/0.95;
+	pricestep = askprice[0]*2/depthwidth;
+	console.log(pricestep);
+	var depths = 5;
+	var prices = 10;
+	for(var i=0;i<depths;i++)
+	{
+		var yamt = depthheight - (depthheight/depths)*i;
+		setDepth(i, yamt, Math.round(depthstep*(depthheight-yamt)));
+	}
+	for(var i=0;i<prices;i++)
+	{
+		var xamt = (depthwidth/prices)*i;
+		var pc = xamt*pricestep+pricemin;
+		if(pc != 0) pc = Math.round(pc * Math.pow(10, -Math.floor(Math.log10(pc)-2)))/Math.pow(10, -Math.floor(Math.log10(pc)-2));
+		else pc = "0.00";
+		setPrice(i, 100+xamt, pc);
+	}
+
+	var m = "M"+ (100+(bidprice[0]-pricemin)/pricestep) +" "+280+" ";
+
+	for(var i=0;i<bidprice.length;i++)
+	{
+		// change mapping
+		m += "L"+(100+(bidprice[i]-pricemin)/pricestep)+" "+(depthheight-bidside[i]/depthstep)+" ";
+	}
+	m += "L100 280"
+	d3.select("#depthlines").append("path").attr("id", "bids").attr("stroke", "green").attr("fill", "#98FB98").attr("stroke-width", 2).attr("d", m);
+
+	var m = "M"+ (100+(askprice[0]-pricemin)/pricestep) +" "+280+" ";
+
+	for(var i=0;i<askprice.length;i++)
+	{
+		// change mapping
+		m += "L"+(100+(askprice[i]-pricemin)/pricestep)+" "+(depthheight-askside[i]/depthstep)+" ";
+	}
+	m += "L1200 280"
+	d3.select("#depthlines").append("path").attr("id", "asks").attr("stroke", "red").attr("fill", "#FFCCCB").attr("stroke-width", 2).attr("d", m);
+
+
+}
+
+	var offsetX = $("#ex_chart").offset().left;
+	var offsetY = $("#ex_chart").offset().top;
+	var width = 1000;
+	var xscales = 100;
+	var height = 600;
+	var volumes = [];
+	var localmin;
+	var amounts = [];
+	var scale = 0;
+	var volscale = 0;
+	var first = 0;
+	var scrollpos = 1200;
+
+// 42628958
+
+
+function adjust(asset)
+{
+	first = asset.trades[asset.trades.length-1].timestamp;
+	var now = getNxtTime();
+	var timespread = now - first;
+	var timescale = timespread/1200;
+	var starttime = first;
+	var endtime = now;
+	var span = endtime-starttime;
+	var timespan = $("input[name=time_span]:checked").val();
+	if(timespan == 0) timespan = now - first;
+	scrollpos = 1200;
+
+
+	var candlesticks = $("input[name=time_width]:checked").val();
+	var sticknum = Math.round(span/candlesticks);
+	var xstep = width/sticknum;
+
+	var show = (timespan/timespread)*1200;
+
+
+	//var starttime = 42827311-(60*60*20);
+
+	$("#bottom_scroll").empty();
+	d3.select("#bottom_scroll").append("rect").attr("id","scroll")
+	.attr("x", 1200-show).attr("width", show)
+	.attr("y", 650).attr("height", 100).attr("fill", "lightgray");
+
+	d3.select("#bottom_scroll").append("line").attr("id", "centerline")
+	.attr("x1", 0).attr("x2", (width+(xscales*2)))
+	.attr("y1", 700.5).attr("y2", 700.5)
+	.attr("stroke", "black");
+
+	var divtime = (endtime-starttime)/(sticknum-1);
+	var phases = [];
+	for(var e=0;e<asset.trades.length;e++)
+	{
+		var trade = asset.trades[e];
+		var phase = Math.floor((asset.trades[e].timestamp - starttime)/divtime);
+		if(phases[phase] == undefined) phases[phase] = [];
+		phases[phase].push(trade);
+	}
+	var prev = 0;
+	vals = [];
+	vols = [];
+	var chwidth = 1200/sticknum;
+	var minchange=1000000000,maxchange=0;
+	var minavg=100000000,maxavg=0;
+	var changes = [];
+	var averages = [];
+	var prevavg = 0;
+	for(var i=0;i<sticknum;i++)
+	{
+		if(phases[i] == undefined) phases[i] = [];
+		vals[i] = Array();
+		vols[i] = 0;
+		averages[i] = 0;
+		if(phases[i].length == 0)
+		{
+			vals[i].push(prev);
+			averages[i] += prev;
+		}
+		else
+		{	
+			for(var j=0;j<phases[i].length;j++)
+			{
+				var price = phases[i][j].priceNQT/Math.pow(10, 8-phases[i][j].decimals);
+				vols[i] += (phases[i][j].quantityQNT/Math.pow(10, phases[i][j].decimals))*(phases[i][j].priceNQT/Math.pow(10, 8-phases[i][j].decimals));
+				vals[i].push(price);
+				averages[i] += price;
+				prev = price;
+			}
+		}
+		if(phases[i].length > 0) averages[i] /= phases[i].length;
+		if(averages[i] < minavg) minavg = averages[i];
+		if(averages[i] > maxavg) maxavg = averages[i];
+		var change = prevavg == 0 ? 0 : prevavg-averages[i];
+		prevavg = averages[i];
+		if(change < minchange) minchange = change;
+		if(change > maxchange) maxchange = change;
+		changes.push(change);
+	}
+	var chscale = maxchange > -minchange ? 50/maxchange : 50/-minchange;
+	chscale *= 0.95;
+	var fst = Math.round(653 + (94-(averages[0]-minavg)/(maxavg-minavg)*94));
+	var m = "M0 "+fst+" L"+Math.round(chwidth/2)+" "+fst + " ";
+
+	for(var i=0;i<sticknum;i++)
+	{
+		// change mapping
+		setChange(i, chwidth*i-(chwidth/2), (chwidth/4)*3, chscale*changes[i]);
+		var b = (averages[i]-minavg)/(maxavg-minavg)*94;
+		m += "L"+Math.round(chwidth*i+(chwidth/2))+" "+Math.round(653 + (94-(b)))+" ";
+	}
+		d3.select("#bottom_scroll").append("path").attr("id", "bottom_path").attr("stroke", "black").attr("fill", "none").attr("stroke-width", 2);
+
+	d3.select("#bottom_path").attr("d", m);
+
+	amounts = vals;
+	volumes = vols;
+	draw();
+}
+
+	function draw()
+	{
+		var now = getNxtTime();
+		var timespread = now - first;
+		var timescale = timespread/1200;
+		var end = scrollpos*timescale;
+		var span = $("input[name=time_span]:checked").val();
+		if(span == 0) span = now-first;
+		var start = span != 0 ? end-span : first;
+		var candlesticks = $("input[name=time_width]:checked").val();
+		var sticknum = Math.round(span/candlesticks);
+		var xstep = width/sticknum;
+
+		var sp = Math.round(amounts.length * (scrollpos/1200));
+		if(sticknum > amounts.length)
+		{
+			var vals = amounts.reverse();
+			while(sticknum > vals.length) vals.push([0]);
+			var vols = volumes.reverse();
+			while(sticknum > vols.length) vols.push(0);
+		}
+		else
+		{
+			var vals = amounts.slice(sp-sticknum, sp).reverse();
+			var vols = volumes.slice(sp-sticknum, sp).reverse();
+		}
+
+		localmin=1000000000;
+		var localmax=0;
+		var volmax=0;
+		for(var i=0;i<sticknum;i++)
+		{
+			var n = vals[i].length;
+			for(var j=0;j<n;j++)
+			{
+				if(vals[i][j] > localmax) localmax = vals[i][j];
+				if(vals[i][j] < localmin) localmin = vals[i][j];
+			}
+			if(vols[i] > volmax) volmax = vols[i];
+		}
+		localmin /= 1.02;
+		localmax /= 0.98;
+		var spread = localmax - localmin;
+		scale = height/spread;
+		volscale = height/volmax;
+		volscale /= 1.1;
+
+		$("#boxes").empty();
+		$("#volbars").empty();
+		$("#axis").empty();
+		var prev = 0;
+		for(var i=0;i<vals.length;i++)
+		{
+			vals[i] = vals[i].sort(numberSort);
+			var info = {};
+			info.head = vals[i][vals[i].length-1];
+			info.tail = vals[i][0];
+			info.midline = vals[i][Math.floor(vals[i].length/2)];
+			info.bottom = vals[i][Math.floor(vals[i].length/4)];
+			info.top = vals[i][Math.floor((vals[i].length/4)*3)];
+			if(prev > info.midline) setColor("bw_"+(i-1), true);
+			else info.direction = setColor("bw_"+(i-1), false);
+			prev = info.midline;
+
+
+			var mdl = Math.round(chartConvert(info.midline, scale, localmin, height));
+			var btm = Math.round(chartConvert(info.bottom, scale, localmin, height)-mdl);
+			var tl = Math.round(chartConvert(info.tail, scale, localmin, height)-btm-mdl);
+			var tp = Math.round(mdl-chartConvert(info.top, scale, localmin, height));
+			var hd = Math.round(mdl-tp-chartConvert(info.head, scale, localmin, height));
+			var xamt = width-(i*xstep)+xscales;
+			if(width%xstep == 0) xamt -= (xstep/2);
+			else xamt -= (xstep/2);
+			xamt = Math.round(xamt);
+
+			box("bw_"+i, info.direction, xamt, mdl, Math.round(xstep/2), btm, tl, tp, hd);
+			volbar("vb_"+i, xamt, Math.round((xstep/4)*3), volscale*vols[i])
+		}
+		setColor("bw_"+(vals.length-1), true);
+
+		var axisnum = 10;
+		for(var i=0;i<axisnum;i++)
+		{
+			var pc = (height/axisnum)*i/scale+localmin;
+			if(pc != 0) pc = Math.round(pc * Math.pow(10, -Math.floor(Math.log10(pc)-2)))/Math.pow(10, -Math.floor(Math.log10(pc)-2));
+			var vol = (height/axisnum)*i/volscale;
+			if(vol != 0) vol = Math.round(vol * Math.pow(10, -Math.floor(Math.log10(vol)-2)))/Math.pow(10, -Math.floor(Math.log10(vol)-2));
+			setAxis(i, height - (height/axisnum)*i, pc, vol);
+		}
+
+		var datesnum = 8;
+		var datestep = Math.round(span/datesnum);
+		var scrollamt = (scrollpos-$("#scroll").attr("width"))/1200;
+		var scrollwd = $("#scroll").attr("width")/1200;
+		console.log(scrollamt + " " + scrollwd)
+		for(var i=0;i<datesnum+1;i++)
+		{
+			setDateAxis(i, first+((span/datesnum)*i)+((now-first)*scrollamt), ((datestep*i)/(span))*(width)+xscales)
+		}		
+	}
+
+	function chartConvert(value, scale, cutoff, topvalue)
+	{
+		return topvalue - (value-cutoff)*scale;
+	}
+	function box(id, direction, xpos, ypos, width, bottom, tail, top, head)
+	{
+		d3.select("#boxes").append("g").attr("id", id);
+		d3.select("#"+id).append("rect").attr("id", "body")
+		.attr("x", xpos-Math.round(width/2))
+		.attr("width", width)
+		.attr("y", ypos-top)
+		.attr("height",bottom+top)
+		d3.select("#"+id).append("line").attr("id", "midline")
+		.attr("x1", xpos-Math.round(width/2))
+		.attr("x2", xpos+Math.round(width/2))
+		.attr("y1", ypos)
+		.attr("y2",ypos)
+		d3.select("#"+id).append("line").attr("id", "bottom")
+		.attr("x1", xpos)
+		.attr("x2", xpos)
+		.attr("y1", ypos+bottom)
+		.attr("y2",ypos+bottom+tail).attr("stroke-width", Math.floor(width/3)+0.5);
+		d3.select("#"+id).append("line").attr("id", "top")
+		.attr("x1", xpos)
+		.attr("x2", xpos)
+		.attr("y1", ypos-top)
+		.attr("y2",ypos-head-top).attr("stroke-width", Math.round(width/3)+0.5);
+	}
+
+	function setColor(id, color)
+	{
+		if(color == true)
+		{
+			d3.select("#"+id+" #body").attr("fill","green").attr("stroke","black").attr("stroke-width","2");
+			d3.select("#"+id+" #midline").attr("stroke","black").attr("stroke-width", "2");
+			d3.select("#"+id+" #top").attr("stroke","black");
+			d3.select("#"+id+" #bottom").attr("stroke","black");
+
+		}
+		else
+		{
+			d3.select("#"+id+" #body").attr("fill","red").attr("stroke","black").attr("stroke-width","2");
+			d3.select("#"+id+" #midline").attr("stroke","black").attr("stroke-width", "2");
+			d3.select("#"+id+" #top").attr("stroke","black");
+			d3.select("#"+id+" #bottom").attr("stroke","black");
+		}
+	}
+
+	function volbar(id, volx, wd, ht)
+	{
+		d3.select("#volbars").append("rect").attr("id",id).attr("fill", "gray")
+		.attr("x", volx-Math.round(wd/2))
+		.attr("width", wd)
+		.attr("y", height-ht)
+		.attr("height", ht);
+	}
+
+	function setAxis(id, axisy, priceText, volumeText)
+	{
+		d3.select("#axis").append("line").attr("id", "line_"+id)
+		.attr("x1", 0).attr("x2", width+(xscales*2))
+		.attr("y1", Math.floor(axisy)+0.5).attr("y2", Math.floor(axisy)+0.5)
+		.attr("stroke", "black").attr("stroke-width", "0.1");
+		d3.select("#axis").append("text").attr("id", "vol_"+id)
+		.attr("x", 10).attr("y", axisy-2).text(volumeText);
+		d3.select("#axis").append("text").attr("id", "price_"+id)
+		.attr("x", width+xscales+10).attr("y", axisy-2).text(priceText);
+	}
+
+	function setDepth(id, axisy, desc)
+	{
+		d3.select("#xaxis").append("line").attr("id", "line_"+id)
+		.attr("x1", 0).attr("x2", depthwidth+100)
+		.attr("y1", Math.floor(axisy)+0.5).attr("y2", Math.floor(axisy)+0.5)
+		.attr("stroke", "black").attr("stroke-width", "0.1");
+		d3.select("#xaxis").append("text").attr("id", "text_"+id)
+		.attr("x", 10).attr("y", axisy-2).text(desc);
+	}
+
+	function setPrice(id, axisx, desc)
+	{
+		d3.select("#yaxis").append("text").attr("id","text_"+id)
+		.attr("x", axisx-20).attr("y", 300-6).text(desc);
+	
+		d3.select("#yaxis").append("line").attr("id", "line_"+id)
+		.attr("x1", Math.floor(axisx)+0.5).attr("x2", Math.floor(axisx)+0.5)
+		.attr("y1", 0).attr("y2", 280)
+		.attr("stroke", "black").attr("stroke-width", "0.1");
+	}
+
+	function setDateAxis(id, date, xpos)
+	{
+
+		var time = new Date((date + 1385294400)*1000);
+		var h = hour(time);
+		var min = Math.round(minute(time)/10)*10;
+		if(min == 60) 
+		{
+			min = "00";
+			h++;
+		}
+		if(min == 0) min = "00";
+		hour(time) + ":" + min;
+
+		d3.select("#axis").append("text").attr("id","date_"+id)
+		.attr("x", xpos-20).attr("y", 620)
+		d3.select("#date_"+id).append("tspan").text(day(time));
+		d3.select("#date_"+id).append("tspan").attr("x", xpos-20).attr("dy", 20).text(h+":"+min);
+	
+		d3.select("#axis").append("line").attr("id", "dl_"+id)
+		.attr("x1", Math.floor(xpos)+0.5).attr("x2", Math.floor(xpos)+0.5)
+		.attr("y1", 0).attr("y2", 600)
+		.attr("stroke", "black").attr("stroke-width", "0.1");
+	}
+
+	function setChange(id, posx, width, amount)
+	{
+		if(amount > 0)
+		{
+			d3.select("#bottom_scroll").append("rect").attr("id", id)
+			.attr("x", Math.floor(posx + (width/2))+0.5).attr("width", width)
+			.attr("y", 700.5).attr("height", Math.round(amount))
+			.attr("fill", "red").attr("stroke", "black");
+		}
+		else
+		{
+			d3.select("#bottom_scroll").append("rect").attr("id", "ch_"+id)
+			.attr("x", Math.floor(posx + (width/2))+0.5).attr("width", Math.round(width))
+			.attr("y", 700.5-Math.round(-amount)).attr("height", Math.round(-amount))
+			.attr("fill", "green").attr("stroke", "black");
+		}
+	}
+
+	function candlesticks()
+	{
+		var span = $("input[name=time_span]:checked").val();
+		if(span == 0) span = getNxtTime() - first;
+		$("input[name=time_width]").each(function() {
+			console.log($(this).val() + " " + span);
+			if(span/$(this).val() <= 128 && span/$(this).val() >= 4)
+			{
+				$(this).parent().show();
+			}
+			else
+			{
+				console.log("aaa");
+				$(this).parent().hide();
+			}
+		})
+	}
+})
+
+
+</script>
+</head>
+<body>
+	<div class="container">
+	<div class="page-header"><h1></h1></div>
+	<div class="img-responsize">
+		<div class="row">
+				<svg id="ex_chart" width="1200" height="750" class="noselect">
+					<rect id="divider" stroke="black" fill="none" stroke-width="1" x="0" y="0" width="1200" height="750"/>
+					<line id="divider2" stroke="black" x1="0" x2="1200" y1="649.5" y2="649.5"/>
+					<g id="grid_lines">
+					</g>
+					<g id="axis">
+					</g>
+					<g id="axis_title">
+						<text x="10" y="20">Volume (NXT)</text>
+						<text x="1110" y="20">Price (NXT)</text>
+					</g>
+					<g id="volbars">
+
+					</g>
+					<g id="cursor_follow">
+						<rect id="backbox_vol"/>
+						<rect id="backbox_price"/>
+						<line id="cursor_follow_x" stroke="black" stroke-width="0.5"/>
+						<line id="cursor_follow_y" stroke="black" stroke-width="0.5"/>
+						<text id="cursor_follow_vol"></text>
+						<text id="cursor_follow_price"></text>
+						
+					</g>
+					
+					
+					<g id="boxes">
+					</g>
+					<g id="bottom_scroll">
+
+					</g>
+				</svg>
+							<br/>
+				Window Span:
+				<div class="btn-group" data-toggle="buttons">
+				 	<label class="btn btn-primary">
+				    	<input type="radio" name="time_span" autocomplete="off" value="43200"> 12h
+				  	</label>
+				  	<label class="btn btn-primary">
+				    	<input type="radio" name="time_span" autocomplete="off" value="86400"> 1d
+				  	</label>
+				  	<label class="btn btn-primary">
+				   		<input type="radio" name="time_span" autocomplete="off" value="259200"> 3d
+				  	</label>
+				  	<label class="btn btn-primary active">
+				   		<input type="radio" name="time_span" autocomplete="off" value="604800" checked> 1w
+				  	</label>
+				  	<label class="btn btn-primary">
+				   		<input type="radio" name="time_span" autocomplete="off" value="1209600"> 2w
+				  	</label>
+				  	<label class="btn btn-primary">
+				   		<input type="radio" name="time_span" autocomplete="off" value="2635200"> 1m
+				  	</label>
+				  	<label class="btn btn-primary">
+				   		<input type="radio" name="time_span" autocomplete="off" value="7905600"> 3m
+				  	</label>
+				  	<label class="btn btn-primary">
+				   		<input type="radio" name="time_span" autocomplete="off" value="15811200"> 6m
+				  	</label>
+				  	<label class="btn btn-primary">
+				   		<input type="radio" name="time_span" autocomplete="off" value="0"> All
+				  	</label>
+				</div>
+
+				Candlesticks:
+				<div class="btn-group" data-toggle="buttons">
+					<label class="btn btn-primary">
+				    	<input type="radio" name="time_width" autocomplete="off" value="3600"> 1h
+				  	</label>
+					<label class="btn btn-primary">
+				    	<input type="radio" name="time_width" autocomplete="off" value="10800"> 3h
+				  	</label>
+					<label class="btn btn-primary active">
+				    	<input type="radio" name="time_width" autocomplete="off" value="21600" checked> 6h
+				  	</label>
+				 	<label class="btn btn-primary">
+				    	<input type="radio" name="time_width" autocomplete="off" value="43200"> 12h
+				  	</label>
+				  	<label class="btn btn-primary">
+				    	<input type="radio" name="time_width" autocomplete="off" value="86400"> 1d
+				  	</label>
+				  	<label class="btn btn-primary">
+				   		<input type="radio" name="time_width" autocomplete="off" value="259200"> 3d
+				  	</label>
+				  	<label class="btn btn-primary">
+				   		<input type="radio" name="time_width" autocomplete="off" value="604800"> 1w
+				  	</label>
+				  	<label class="btn btn-primary">
+				   		<input type="radio" name="time_width" autocomplete="off" value="1209600"> 2w
+				  	</label>
+				  	<label class="btn btn-primary">
+				   		<input type="radio" name="time_width" autocomplete="off" value="2635200"> 1m
+				  	</label>
+				</div>
+			</div>
+		</div><br/>
+		<div class="row">
+			<div class="col-md-6">
+				<h3>Buy <span class="asset"></span></h3>
+				<div class="panel panel-success">
+					<div class="panel-body">
+						<div class="container-fluid">
+							<form class="form-horizontal">
+								<div class="form-group">
+    								<label for="buy_order_price" class="col-sm-2 control-label">Price</label>
+    								<div class="col-sm-10">
+										<div class="input-group">
+ 											<input id="buy_order_price" type="text" class="form-control">
+  											<span class="input-group-addon">NXT</span>
+  										</div>
+									</div>
+								</div>
+								<div class="form-group">
+    								<label for="buy_order_amount" class="col-sm-2 control-label">Amount</label>
+    								<div class="col-sm-10">
+										<div class="input-group">
+ 											<input id="buy_order_amount" type="text" class="form-control">
+  											<span class="input-group-addon asset"></span>
+  										</div>
+									</div>
+								</div>
+								<hr/>
+								<div class="form-group">
+    								<label for="buy_order_total" class="col-sm-2 control-label">Total</label>
+    								<div class="col-sm-10">
+										<div class="input-group">
+ 											<input id="buy_order_total" type="text" class="form-control">
+  											<span class="input-group-addon">NXT</span>
+  										</div>
+									</div>
+								</div>
+								<div class="form-group">
+    								<label for="buy_order_fee" class="col-sm-2 control-label">Fee</label>
+    								<div class="col-sm-10">
+										<div class="input-group">
+ 											<input id="buy_order_fee" type="text" class="form-control" readonly value="1">
+  											<span class="input-group-addon">NXT</span>
+  										</div>
+									</div>
+								</div>
+								<hr/>
+								<div class="form-group">
+									<div class="col-sm-8">
+										<input id="buy_order_trf" type="text" class="form-control" placeholder="TX_ code" readonly>
+									</div>
+									<div class="col-sm-4">
+										<button id="buy_order_place" class="btn btn-success" type="button">Create Buy Order</button>
+
+									</div>
+								</div>
+							</form>
+						</div>
+					</div>
+				</div>
+			</div>
+			<div class="col-md-6">
+				<h3>Sell <span class="asset"></span></h3>
+				<div class="panel panel-danger">
+					<div class="panel-body">
+						<div class="container-fluid">
+							<form class="form-horizontal">
+								<div class="form-group">
+    								<label for="sell_order_price" class="col-sm-2 control-label">Price</label>
+    								<div class="col-sm-10">
+										<div class="input-group">
+ 											<input id="sell_order_price" type="text" class="form-control">
+  											<span class="input-group-addon">NXT</span>
+  										</div>
+									</div>
+								</div>
+								<div class="form-group">
+    								<label for="sell_order_amount" class="col-sm-2 control-label">Amount</label>
+    								<div class="col-sm-10">
+										<div class="input-group">
+ 											<input id="sell_order_amount" type="text" class="form-control">
+  											<span class="input-group-addon asset"></span>
+  										</div>
+									</div>
+								</div>
+								<hr/>
+								<div class="form-group">
+    								<label for="sell_order_total" class="col-sm-2 control-label">Total</label>
+    								<div class="col-sm-10">
+										<div class="input-group">
+ 											<input id="sell_order_total" type="text" class="form-control">
+  											<span class="input-group-addon">NXT</span>
+  										</div>
+									</div>
+								</div>
+								<div class="form-group">
+    								<label for="sell_order_fee" class="col-sm-2 control-label">Fee</label>
+    								<div class="col-sm-10">
+										<div class="input-group">
+ 											<input id="sell_order_fee" type="text" class="form-control" readonly value="1">
+  											<span class="input-group-addon">NXT</span>
+  										</div>
+									</div>
+								</div>
+								<hr/>
+								<div class="form-group">
+									<div class="col-sm-8">
+										<input id="sell_order_trf" type="text" class="form-control" placeholder="TX_ code" readonly>
+									</div>
+									<div class="col-sm-4">
+										<button id="sell_order_place" class="btn btn-danger" type="button">Create Sell Order</button>
+
+									</div>
+								</div>
+							</form>
+						</div>
+					</div>
+				</div>
+			</div>
+		</div>
+		<div class="row">
+			<div class="col-md-6">
+				<h3>Sell Orders</h3>
+				<div class="fixed_height" style="overflow: auto;height:340px;">
+					<table id="sell_orders_table" class="table table-hover">
+						<thead>
+							<tr>
+								<th>Price</th>
+								<th><span class="asset"></span></th>
+								<th>NXT</th>
+								<th>Sum (NXT)</th>
+							</tr>
+						</thead>
+						<tbody>
+						</tbody>
+					</table>
+				</div>
+			</div>
+			<div class="col-md-6">
+				<h3>Buy Orders</h3>
+				<div class="fixed_height" style="overflow: auto; height: 340px;">
+					<table id="buy_orders_table" class="table table-hover">
+						<thead>
+							<tr>
+								<th>Price</th>
+								<th><span class="asset"></span></th>
+								<th>NXT</th>
+								<th>Sum (NXT)</th>
+							</tr>
+						</thead>
+						<tbody>
+						</tbody>
+					</table>
+				</div>
+			</div>
+		</div>
+		<div class="row">
+			<div class="col-md-12">
+				<h3>Market Depth</h3>
+				<svg id="depth" width="1200" height="300">
+					<rect id="divider" stroke="black" fill="none" stroke-width="1" x="0" y="0" width="1200" height="300"/>
+
+					
+
+					<g id="depthlines">
+					</g>
+					
+					<g id="xaxis">
+					</g>
+					<g id="yaxis">
+					</g>
+
+					<g id="cursor">
+						<circle id="depth_circle" r="4" fill="black"/>
+						<line id="depth_bar" stroke-width="1" stroke="black">
+					</g>
+				</svg>
+			</div>
+		</row>
+		<div class="row">
+			<div class="col-md-12">
+				<h3>Trade History</h3>
+				<div class="fixed_height" style="overflow: auto;height:340px;">
+					<table id="trade_history_table" class="table table-hover">
+						<thead>
+							<tr>
+								<th>Date</th>
+								<th>Type</th>
+								<th>Price (NXT)</th>
+								<th>Amount (<span class="asset"></span>)</th>
+								<th>Total (NXT)</th>
+							</tr>
+						</thead>
+						<tbody>
+						</tbody>
+					</table>
+				</div>
+			</div>
+		</div>
+
+	</div>
+	
+	<footer>
+		<div class="footer">
+			<p class="text-center">
+				Jay Framework, 2015
+			</p>
+		</div>
+	</footer>
+
+</div>
+
+<div id="depth_hover" width="100px" style="padding:0;margin:0;position:absolute;">
+		<div class="alert alert-info" style="padding:4px;margin:0">
+			<p><strong>Price:</strong> <span id="hover_price"></span> NXT</p>
+			<p><strong>Total:</strong> <span id="hover_nxt"></span> NXT</p>
+			<p><strong>Total:</strong> <span id="hover_asset"></span> <span class="asset"></span></p>
+	</div>
+</body>
+</html>
