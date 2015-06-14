@@ -747,7 +747,9 @@ var litnum = 0;
 
 		adjust(data);
 		$("h1 span.asset").attr("data-content", jay.assetData.description);
-		$("span.asset").html(jay.assetData.name);
+		$("span.asset").text(jay.assetData.name);
+		$(".assetid").text(jay.assetData.asset);
+		$(".issuer").text(jay.assetData.accountRS);
 			history(jay.trades);
 
 		  	bidOrders(data.bidOrders);
@@ -902,6 +904,13 @@ function bidOrders(ord)
 
 				row += "<td><div class='dropdown'><button class='btn btn-xs btn-default dropdown-toggle' type='button' id='buydrop"+i+"' data-toggle='dropdown' aria-expanded='true'><span class='caret'></span></button>";
 				row +=  "<ul class='dropdown-menu' role='menu' aria-labelledby='buydrop"+i+"'>";
+				if(orders[i].accountRS == rs)
+				{
+					row += "<li role='presentation'><a data-toggle='modal' data-target='#modal_cancel' role='menuitem' tabindex='-1' href='#'>Cancel Buy Order</a></li>";
+					row += "<li role='presentation' class='divider'></li>";
+
+				}
+
 				row += "<li role='presentation' class='dropdown-header'>"+orders[i].accountRS+"</li>";
 				row += "<li role='presentation'><a role='menuitem' tabindex='-1' href='#'>Copy Address To Clipboard</a></li>";
 				row += "<li role='presentation'><a role='menuitem' tabindex='-1' href='http://www.nxtreporting.com/?ac="+orders[i].accountRS+"' target='_blank'>Open Account in NxtReporting</a></li>";
@@ -996,6 +1005,12 @@ function askOrders(ord)
 				
 				row += "<td><div class='dropdown'><button class='btn btn-xs btn-default dropdown-toggle' type='button' id='selldrop"+i+"' data-toggle='dropdown' aria-expanded='true'><span class='caret'></span></button>";
 				row +=  "<ul class='dropdown-menu' role='menu' aria-labelledby='selldrop"+i+"'>";
+				if(orders[i].accountRS == rs)
+				{
+					row += "<li role='presentation'><a data-toggle='modal' data-target='#modal_cancel' role='menuitem' tabindex='-1' href='#'>Cancel Sell Order</a></li>";
+					row += "<li role='presentation' class='divider'></li>";
+
+				}
 				row += "<li role='presentation' class='dropdown-header'>"+orders[i].accountRS+"</li>";
 				row += "<li role='presentation'><a role='menuitem' tabindex='-1' href='#'>Copy Address To Clipboard</a></li>";
 				row += "<li role='presentation'><a role='menuitem' tabindex='-1' href='http://www.nxtreporting.com/?ac="+orders[i].accountRS+"' target='_blank'>Open Account in NxtReporting</a></li>";
@@ -1960,12 +1975,31 @@ function adjust(asset)
 
 	if(window.innerWidth < 1500)
 	{
-		$("h1").data("wide", "false");
-		resize();
-		adjust(jay);
+		//$("h1").data("wide", "false");
+		//resize();
+		//adjust(jay);
 	}
 
-	$("#minimize").click(resize);
+	$("#minimize").click(function() {
+		console.log("aaahahaha");
+		$(".sidebar").toggle();
+		if($("h1").data("wide") == "true")
+		{
+			$("h1").data("wide", "false");
+			$(".page").attr("id","page-wrapper");
+			$(".page").css("padding", "default");
+			depth();
+			adjust(jay);
+		}
+		else
+		{
+			$("h1").data("wide", "true");
+			$(".page").attr("id", "page-notwrapper");
+			$(".page").css("padding","20px").css("background-color", "white");
+			depth();
+			adjust(jay);
+		}
+	});
 
 	function resize()
 	{
@@ -1988,12 +2022,12 @@ function adjust(asset)
 		}
 	}
 
-	$(window).resize(function() {
-		if(window.innerWidth < 1500)
+	$(window).bind("resize", function() {
+		/*if(window.innerWidth < 1500)
 		{
 			$("h1").data("wide", "false");
 			resize();
-		}
+		}*/
 		depth();
 		adjust(jay);
 	})
@@ -2017,7 +2051,7 @@ function adjust(asset)
                     <span class="icon-bar"></span>
                 </button>-->
                 <a class="navbar-brand" href="index.html">Jay Exchange (Beta)</a>
-                <a href="#" class="pull-right" id="minimize" data-animation="false" data-toggle="collapse" data-target=".navbar-collapse"><i style="margin-top: 12px;margin-right:6px;" class="fa fa-bars fa-2x"></i></a>
+                <div class="pull-right" id="minimize"><i id="minimize" style="margin-top: 12px;margin-right:6px;color:dodgerblue;" class="fa fa-bars fa-2x"></i></div>
 
 
             </div>
@@ -2072,7 +2106,16 @@ function adjust(asset)
             <div class="row">
                 <div class="col-lg-12">
                 	<div class="page-header">
-                    	<h1><span class="asset" data-toggle='popover' title='Asset Description' data-placement='bottom' data-container="body" style="border-bottom: 1px dotted #000"></span>/NXT Market</h1>
+                    	<h1 style="width: 50% !important;">
+                    		<span class="asset" data-toggle='popover' title='Asset Description' data-placement='bottom' data-container="body" style="border-bottom: 1px dotted #000"></span>
+                    		/NXT Market
+                    	</h1>
+                    	<div style="position: relative;bottom: 50px;font-size:10pt;" class="pull-right label label-primary">
+                    		Asset Id: 
+                    		<strong class="assetid"></strong><br/> 
+                    		Issuer:
+                    		<strong class="issuer"></strong>
+                    	</div>
                 	</div>
                 </div>
                 <!-- /.col-lg-12 -->

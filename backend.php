@@ -12,7 +12,9 @@ function getNxtTime()
 	return floor(time()) - 1385294400;
 }
 $starttime = time();
-$assetdata = req("requestType=getAllAssets");
+$assetdata = req("requestType=getAllAssets&lastIndex=600");
+var_dump($assetdata->assets);
+echo count($assetdata->assets);
 $assets = $assetdata;
 $unordered = array();
 $volumes = array();
@@ -85,14 +87,14 @@ foreach($assets->assets as $asset)
 	$storeasset->bidOrders = $buys->bidOrders;*/
 	array_push($unordered, $newer);
 
-	file_put_contents("./data/".$asset->asset.".json", json_encode($storeasset));
+	file_put_contents("/var/www/html/jayex/data/".$asset->asset.".json", json_encode($storeasset));
 	unset($trade);
 	unset($storeasset);
 }
 
 sort($volumes);
 $volumes = array_reverse($volumes);
-var_dump($volumes);
+//var_dump($volumes);
 $ordered = array();
 for($i=0;$i<count($unordered);$i++)
 {
@@ -108,6 +110,6 @@ for($i=0;$i<count($unordered);$i++)
 	}
 }
 
-file_put_contents("./data/assets.json", json_encode($ordered));
+file_put_contents("/var/www/html/jayex/data/assets.json", json_encode($ordered));
 echo "completed in " . (time() - $starttime) . " seconds\n\n";
 ?>
