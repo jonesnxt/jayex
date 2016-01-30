@@ -12,7 +12,7 @@ function getNxtTime()
 	return floor(time()) - 1385294400;
 }
 $starttime = time();
-$assetdata = req("requestType=getAllAssets&lastIndex=600");
+$assetdata = req("requestType=getAllAssets&includeCounts=true");
 var_dump($assetdata->assets);
 echo count($assetdata->assets);
 $assets = $assetdata;
